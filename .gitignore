@@ -1,0 +1,46 @@
+# dependencies
+node_modules/
+
+# Expo / React Native
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native / build artifacts
+.kotlin/
+.metro-health-check*
+*.orig.*
+/ios
+/android
+
+# debug logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# OS files
+.DS_Store
+
+# secrets / certs / keys
+*.pem
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+.env
+.env*.local
+backend/.env
+backend/keys/
+
+# TypeScript
+*.tsbuildinfo
+
+# Python backend
+backend/.venv/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/.mypy_cache/
+__pycache__/
+*.pyc

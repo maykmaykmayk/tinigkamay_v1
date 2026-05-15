@@ -1,0 +1,53 @@
+# Node / Expo
+node_modules/
+.expo/
+dist/
+web-build/
+.expo-shared/
+
+# Local env files
+.env
+.env.*
+!.env.example
+backend/.env
+
+# Python backend (not needed for Android app build)
+backend/
+.venv/
+**/.venv/
+__pycache__/
+*.pyc
+
+# Native generated folders (EAS handles these)
+android/
+ios/
+
+# Logs / temp / caches
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+tmp/
+temp/
+.cache/
+
+# Archives / large artifacts
+*.zip
+*.tar
+*.gz
+*.7z
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Git / docs / misc (optional for smaller upload context)
+.git/
+.github/
+README.md
+*.md
+
+# Cursor-specific local files
+.cursor/

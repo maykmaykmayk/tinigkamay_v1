@@ -1,0 +1,32 @@
+{
+  "name": "tinigkamay_v1",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "api": "backend\\.venv\\Scripts\\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload --app-dir backend",
+    "tunnel:frontend": "cloudflared tunnel --url http://localhost:8081",
+    "tunnel:backend": "cloudflared tunnel --url http://localhost:8000",
+    "demo:tunnel": "concurrently -k -n WEB,API,TFE,TBK -c blue,green,magenta,cyan \"npm run web\" \"npm run api\" \"npm run tunnel:frontend\" \"npm run tunnel:backend\""
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~54.0.33",
+    "expo-av": "~16.0.8",
+    "expo-build-properties": "~1.0.10",
+    "expo-camera": "^17.0.10",
+    "expo-speech": "~14.0.8",
+    "expo-status-bar": "~3.0.9",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-web": "^0.21.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "private": true
+}
