@@ -872,13 +872,6 @@ export default function CameraDetectionScreen({ onBack }) {
           </Pressable>
         </View>
 
-        <View style={styles.controlsRow}>
-          <Pressable onPress={toggleCameraFacing} style={[styles.modeBtn, styles.rowFillBtn]}>
-            <Text style={styles.modeBtnText}>
-              Camera: {cameraFacing === 'front' ? 'Front' : 'Back'}
-            </Text>
-          </Pressable>
-        </View>
       </View>
 
       <Text style={styles.statusText}>{status}</Text>
