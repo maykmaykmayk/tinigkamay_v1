@@ -630,13 +630,11 @@ export default function CameraDetectionScreen({ onBack }) {
   };
 
   const toggleCameraFacing = () => {
-    if (isWeb) {
-      setStatus('Web uses the default browser camera');
-      return;
-    }
-    setCameraFacing((prev) => (prev === 'front' ? 'back' : 'front'));
-    const nextCamera = cameraFacing === 'front' ? 'Back' : 'Front';
-    setStatus(`Camera: ${nextCamera}. Detection threshold auto-tuned.`);
+    setCameraFacing((prev) => {
+      const next = prev === 'front' ? 'back' : 'front';
+      setStatus(`Camera: ${next === 'front' ? 'Front' : 'Back'}. Detection threshold auto-tuned.`);
+      return next;
+    });
     setIsCameraReady(false);
     cameraReadyAtRef.current = 0;
     if (isDetectingRef.current) {
@@ -727,7 +725,8 @@ export default function CameraDetectionScreen({ onBack }) {
           <CameraView
             ref={cameraRef}
             style={styles.camera}
-            {...(!isWeb ? { facing: cameraFacing, animateShutter: false } : {})}
+            facing={cameraFacing}
+            {...(!isWeb ? { animateShutter: false } : {})}
             onCameraReady={() => {
               setIsCameraReady(true);
               cameraReadyAtRef.current = Date.now();
@@ -801,6 +800,18 @@ export default function CameraDetectionScreen({ onBack }) {
               ) : null}
             </View>
           </View>
+          <Pressable
+            onPress={toggleCameraFacing}
+            style={styles.flipCameraBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Switch camera"
+          >
+            <MaterialIcons
+              name={Platform.OS === 'ios' ? 'flip-camera-ios' : 'flip-camera-android'}
+              size={24}
+              color="#E2E8F0"
+            />
+          </Pressable>
         </View>
       ) : (
         <View style={styles.permissionCard}>
@@ -861,15 +872,13 @@ export default function CameraDetectionScreen({ onBack }) {
           </Pressable>
         </View>
 
-        {!isWeb ? (
-          <View style={styles.controlsRow}>
-            <Pressable onPress={toggleCameraFacing} style={[styles.modeBtn, styles.rowFillBtn]}>
-              <Text style={styles.modeBtnText}>
-                Camera: {cameraFacing === 'front' ? 'Front' : 'Back'}
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
+        <View style={styles.controlsRow}>
+          <Pressable onPress={toggleCameraFacing} style={[styles.modeBtn, styles.rowFillBtn]}>
+            <Text style={styles.modeBtnText}>
+              Camera: {cameraFacing === 'front' ? 'Front' : 'Back'}
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       <Text style={styles.statusText}>{status}</Text>
@@ -928,6 +937,20 @@ const styles = StyleSheet.create({
   },
   camera: {
     flex: 1,
+  },
+  flipCameraBtn: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0F172AD9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
   },
   overlayFrame: {
     ...StyleSheet.absoluteFillObject,
