@@ -182,6 +182,7 @@ export default function CameraDetectionScreen({ onBack }) {
   const transcript = rawTranscript;
   const isFrontCamera = cameraFacing === 'front';
   const isWeb = Platform.OS === 'web';
+  const shouldMirrorOverlayX = false;
 
   const clearDetectionTimer = () => {
     if (timerRef.current) {
@@ -485,62 +486,28 @@ export default function CameraDetectionScreen({ onBack }) {
         modelName: result?.model_name || '',
         yoloConfidence: Number(result?.yolo_confidence) || 0,
       });
-      const qualityHints = Array.isArray(result?.quality_hints) ? result.quality_hints : [];
-      const qualityHintText = qualityHints.length
-        ? ` | hint: ${qualityHints.join(', ')}`
-        : '';
       if (result?.detected && result?.label) {
         noDetectStreakRef.current = 0;
         const isLandmarkFastPath =
           result?.prediction_source === 'landmark_classifier' &&
           Number(result.confidence) >= LANDMARK_FAST_ACCEPT_CONFIDENCE;
         if (isLandmarkFastPath) {
-          const didAppend = appendPrediction(result.label);
-          setStatus(
-            didAppend
-              ? `Detected (fast): ${result.label} (${(Number(result.confidence) * 100).toFixed(
-                  1
-                )}%) [${result?.prediction_source || requestDatasetMode}]${
-                  result?.model_used ? ` [model:${result?.model_name || 'yolo'}]` : ''
-                } [net:${latestNetworkMsRef.current}ms, thr:${requestConfThreshold}]${qualityHintText}`
-              : `Detected ${result.label}; briefly release hand to repeat same sign. [net:${latestNetworkMsRef.current}ms, thr:${requestConfThreshold}]${qualityHintText}`
-          );
+          appendPrediction(result.label);
+          setStatus(`${result.label} (${(Number(result.confidence) * 100).toFixed(1)}%)`);
           speakLabel(result.label).catch((speechError) => {
             console.error('TTS error', speechError);
           });
           return;
         }
         const smoothed = getSmoothedPrediction(result.label, result.confidence);
-        const bboxArea =
-          Number(result?.bbox?.width || 0) * Number(result?.bbox?.height || 0);
-        let framingHint = '';
-        if (bboxArea > 0 && bboxArea < 0.03) {
-          framingHint = ' Move hand closer.';
-        } else if (bboxArea > 0.55) {
-          framingHint = ' Move hand farther.';
-        }
         if (smoothed) {
-          const didAppend = appendPrediction(smoothed.label);
-          setStatus(
-            didAppend
-              ? `Detected: ${smoothed.label} (${(smoothed.avgConfidence * 100).toFixed(
-                  1
-                )}%) [${result?.prediction_source || requestDatasetMode}]${
-                  result?.model_used ? ` [model:${result?.model_name || 'yolo'}]` : ''
-                } [net:${latestNetworkMsRef.current}ms, thr:${requestConfThreshold}]${qualityHintText}${framingHint}`
-              : `Detected ${smoothed.label}; briefly release hand to repeat same sign. [net:${latestNetworkMsRef.current}ms, thr:${requestConfThreshold}]${qualityHintText}${framingHint}`
-          );
+          appendPrediction(smoothed.label);
+          setStatus(`${smoothed.label} (${(smoothed.avgConfidence * 100).toFixed(1)}%)`);
           speakLabel(smoothed.label).catch((speechError) => {
             console.error('TTS error', speechError);
           });
         } else {
-          setStatus(
-            `Detecting... candidate ${result.label} (${(result.confidence * 100).toFixed(
-              1
-            )}%) [${result?.prediction_source || requestDatasetMode}]${
-              result?.model_used ? ` [model:${result?.model_name || 'yolo'}]` : ''
-            } [net:${latestNetworkMsRef.current}ms, thr:${requestConfThreshold}]${qualityHintText}${framingHint}`
-          );
+          setStatus(`${result.label} (${(result.confidence * 100).toFixed(1)}%)`);
         }
       } else {
         noDetectStreakRef.current += 1;
@@ -548,19 +515,7 @@ export default function CameraDetectionScreen({ onBack }) {
           repeatReleaseRef.current = true;
         }
         clearOverlay();
-        const source = result?.prediction_source ? ` (${result.prediction_source})` : '';
-        const confPct = Number(result?.confidence)
-          ? ` [top ${(Number(result.confidence) * 100).toFixed(1)}%]`
-          : '';
-        const detectorHint =
-          result?.prediction_source === 'no_hand_landmarks_required'
-            ? ' | landmark-required mode: show full hand clearly in frame.'
-            : backendInfoRef.current.mediapipeMode === 'disabled'
-              ? ' | backend hint: enable MediaPipe for better hand localization.'
-              : '';
-        setStatus(
-          `Detecting... no sign recognized${source}${confPct} [net:${latestNetworkMsRef.current}ms, thr:${requestConfThreshold}]${qualityHintText}${detectorHint}`
-        );
+        setStatus('No sign detected');
       }
     } catch (error) {
       const msg =
@@ -673,8 +628,8 @@ export default function CameraDetectionScreen({ onBack }) {
       if (!start || !end) {
         return null;
       }
-      const startXNorm = isFrontCamera ? 1 - start.x : start.x;
-      const endXNorm = isFrontCamera ? 1 - end.x : end.x;
+      const startXNorm = shouldMirrorOverlayX && isFrontCamera ? 1 - start.x : start.x;
+      const endXNorm = shouldMirrorOverlayX && isFrontCamera ? 1 - end.x : end.x;
       const startX = startXNorm * cameraLayout.width;
       const startY = start.y * cameraLayout.height;
       const endX = endXNorm * cameraLayout.width;
@@ -723,6 +678,7 @@ export default function CameraDetectionScreen({ onBack }) {
           }}
         >
           <CameraView
+            key={isWeb ? `camera-web-${cameraFacing}` : 'camera-native'}
             ref={cameraRef}
             style={styles.camera}
             facing={cameraFacing}
@@ -742,6 +698,11 @@ export default function CameraDetectionScreen({ onBack }) {
               setIsCameraReady(false);
               cameraReadyAtRef.current = 0;
               const msg = error?.message || 'Unknown mount error';
+              if (isWeb && cameraFacing === 'back') {
+                setCameraFacing('front');
+                setStatus(`Back camera unavailable on this browser/device. Switched to front camera.`);
+                return;
+              }
               setStatus(`Camera failed to start (${isWeb ? 'web' : cameraFacing}): ${msg}`);
               console.error('Camera mount error', error);
             }}
@@ -754,7 +715,7 @@ export default function CameraDetectionScreen({ onBack }) {
                     styles.boundingBox,
                     {
                       left: `${
-                        (isFrontCamera
+                        (shouldMirrorOverlayX && isFrontCamera
                           ? 1 - (overlayData.bbox.x + overlayData.bbox.width)
                           : overlayData.bbox.x) * 100
                       }%`,
@@ -773,7 +734,10 @@ export default function CameraDetectionScreen({ onBack }) {
                       style={[
                         styles.landmarkPoint,
                         {
-                          left: `${(isFrontCamera ? 1 - landmark.x : landmark.x) * 100}%`,
+                          left: `${
+                            (shouldMirrorOverlayX && isFrontCamera ? 1 - landmark.x : landmark.x) *
+                            100
+                          }%`,
                           top: `${landmark.y * 100}%`,
                         },
                       ]}
@@ -857,27 +821,25 @@ export default function CameraDetectionScreen({ onBack }) {
         </View>
 
         <View style={styles.controlsRow}>
-          <Pressable
-            onPress={() => setIsTtsEnabled((prev) => !prev)}
-            style={[styles.ttsBtn, styles.rowFillBtn, isTtsEnabled && styles.ttsBtnActive]}
-          >
-            <MaterialIcons
-              name={isTtsEnabled ? 'volume-up' : 'volume-off'}
-              size={18}
-              color={isTtsEnabled ? '#FFFFFF' : '#CBD5E1'}
-            />
-            <Text style={[styles.ttsBtnText, isTtsEnabled && styles.ttsBtnTextActive]}>
-              {isTtsEnabled ? 'TTS On' : 'TTS Off'}
-            </Text>
-          </Pressable>
+          <View style={styles.rowIconRight}>
+            <Pressable
+              onPress={() => setIsTtsEnabled((prev) => !prev)}
+              style={[styles.ttsIconBtn, isTtsEnabled && styles.ttsIconBtnActive]}
+              accessibilityRole="button"
+              accessibilityLabel={isTtsEnabled ? 'Disable text to speech' : 'Enable text to speech'}
+            >
+              <MaterialIcons
+                name={isTtsEnabled ? 'volume-up' : 'volume-off'}
+                size={20}
+                color={isTtsEnabled ? '#FFFFFF' : '#CBD5E1'}
+              />
+            </Pressable>
+          </View>
         </View>
 
       </View>
 
       <Text style={styles.statusText}>{status}</Text>
-      <View style={styles.connectionRow}>
-        <Text style={styles.connectionText}>Server: {BACKEND_BASE_URL}</Text>
-      </View>
 
       <View style={styles.transcriptBox}>
         <Text style={styles.transcriptLabel}>Translated Text</Text>
@@ -1058,14 +1020,18 @@ const styles = StyleSheet.create({
     color: '#CBD5E1',
     fontWeight: '600',
   },
-  ttsBtn: {
-    borderRadius: 12,
+  rowIconRight: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  ttsIconBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: '#334155',
     alignItems: 'center',
     justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
     backgroundColor: '#111827',
   },
   modeBtn: {
@@ -1098,39 +1064,14 @@ const styles = StyleSheet.create({
     minHeight: 48,
     minWidth: 0,
   },
-  ttsBtnActive: {
+  ttsIconBtnActive: {
     backgroundColor: '#256AF4',
     borderColor: '#256AF4',
-  },
-  ttsBtnText: {
-    color: '#CBD5E1',
-    fontWeight: '600',
-  },
-  ttsBtnTextActive: {
-    color: '#FFFFFF',
   },
   statusText: {
     color: '#94A3B8',
     marginBottom: 10,
     minHeight: 18,
-  },
-  connectionRow: {
-    marginBottom: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#1F2937',
-    backgroundColor: '#0B1220',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  connectionText: {
-    color: '#CBD5E1',
-    fontSize: 12,
-    flex: 1,
   },
   transcriptBox: {
     minHeight: 100,
