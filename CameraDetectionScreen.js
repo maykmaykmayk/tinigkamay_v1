@@ -1,4 +1,5 @@
 import { MaterialIcons } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Speech from 'expo-speech';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -79,6 +80,7 @@ export default function CameraDetectionScreen({ onBack }) {
   const [isCameraReady, setIsCameraReady] = useState(Platform.OS === 'web');
   const [cameraFacing, setCameraFacing] = useState('front');
   const [isTtsEnabled, setIsTtsEnabled] = useState(false);
+  const [ttsMode, setTtsMode] = useState('');
   const [translatedLines, setTranslatedLines] = useState([]);
   const [status, setStatus] = useState('Idle');
   const [datasetMode, setDatasetMode] = useState('alphabet');
@@ -99,6 +101,7 @@ export default function CameraDetectionScreen({ onBack }) {
   const isDetectingRef = useRef(false);
   const isRequestInFlightRef = useRef(false);
   const lastSpokenLabelRef = useRef('');
+  const ttsSoundRef = useRef(null);
   const predictionBufferRef = useRef([]);
   const lastAcceptedPredictionRef = useRef({ label: '', timestamp: 0 });
   const cameraReadyAtRef = useRef(0);
@@ -121,6 +124,12 @@ export default function CameraDetectionScreen({ onBack }) {
         timerRef.current = null;
       }
       Speech.stop();
+      const currentSound = ttsSoundRef.current;
+      ttsSoundRef.current = null;
+      if (currentSound) {
+        currentSound.stopAsync().catch(() => {});
+        currentSound.unloadAsync().catch(() => {});
+      }
     },
     []
   );
@@ -336,7 +345,69 @@ export default function CameraDetectionScreen({ onBack }) {
     };
   };
 
+  const stopBackendAudioPlayback = async () => {
+    const currentSound = ttsSoundRef.current;
+    ttsSoundRef.current = null;
+    if (!currentSound) {
+      return;
+    }
+    try {
+      await currentSound.stopAsync();
+    } catch {
+      // Ignore stop errors when the sound already ended.
+    }
+    try {
+      await currentSound.unloadAsync();
+    } catch {
+      // Ignore unload errors on disposed sounds.
+    }
+  };
+
+  const speakWithBackendTts = async (label) => {
+    const response = await fetchWithTimeout(
+      `${BACKEND_BASE_URL}/tts`,
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: label,
+          language_code: 'fil-PH',
+        }),
+      },
+      7000
+    );
+    if (!response.ok) {
+      throw new Error(`Backend TTS error: ${response.status}`);
+    }
+    const payload = await response.json();
+    if (!payload?.audio_base64) {
+      throw new Error('Backend TTS returned empty audio');
+    }
+
+    await Speech.stop();
+    await stopBackendAudioPlayback();
+    const uri = `data:${payload?.mime_type || 'audio/mpeg'};base64,${payload.audio_base64}`;
+    const { sound } = await Audio.Sound.createAsync(
+      { uri },
+      { shouldPlay: true, progressUpdateIntervalMillis: 250 }
+    );
+    ttsSoundRef.current = sound;
+    sound.setOnPlaybackStatusUpdate((status) => {
+      if (!status.isLoaded || !status.didJustFinish) {
+        return;
+      }
+      sound.unloadAsync().catch(() => {});
+      if (ttsSoundRef.current === sound) {
+        ttsSoundRef.current = null;
+      }
+    });
+  };
+
   const speakWithExpoSpeech = async (label) => {
+    await stopBackendAudioPlayback();
     await Speech.stop();
     return new Promise((resolve, reject) => {
       Speech.speak(label, {
@@ -358,10 +429,17 @@ export default function CameraDetectionScreen({ onBack }) {
     lastSpokenLabelRef.current = label;
 
     try {
-      await speakWithExpoSpeech(label);
+      await speakWithBackendTts(label);
+      setTtsMode('Voice: gTTS');
     } catch (error) {
-      setStatus('TTS error on device');
-      console.error(error);
+      console.warn('Backend TTS failed, falling back to device speech', error);
+      try {
+        await speakWithExpoSpeech(label);
+        setTtsMode('Voice: device fallback');
+      } catch (fallbackError) {
+        setStatus('TTS error on device');
+        console.error(fallbackError);
+      }
     }
   };
 
@@ -369,6 +447,7 @@ export default function CameraDetectionScreen({ onBack }) {
     isDetectingRef.current = false;
     clearDetectionTimer();
     Speech.stop();
+    stopBackendAudioPlayback().catch(() => {});
     resetSmoothingState();
     noDetectStreakRef.current = 0;
     dynamicIntervalMsRef.current = PLATFORM_PROFILE.detectionIntervalMs;
@@ -580,8 +659,22 @@ export default function CameraDetectionScreen({ onBack }) {
     setTranslatedLines([]);
     lastSpokenLabelRef.current = '';
     Speech.stop();
+    stopBackendAudioPlayback().catch(() => {});
     resetSmoothingState();
     clearOverlay();
+  };
+
+  const toggleTts = () => {
+    setIsTtsEnabled((prev) => {
+      const next = !prev;
+      if (!next) {
+        Speech.stop();
+        stopBackendAudioPlayback().catch(() => {});
+        lastSpokenLabelRef.current = '';
+        setTtsMode('');
+      }
+      return next;
+    });
   };
 
   const toggleCameraFacing = () => {
@@ -823,7 +916,7 @@ export default function CameraDetectionScreen({ onBack }) {
         <View style={styles.controlsRow}>
           <View style={styles.rowIconRight}>
             <Pressable
-              onPress={() => setIsTtsEnabled((prev) => !prev)}
+              onPress={toggleTts}
               style={[styles.ttsIconBtn, isTtsEnabled && styles.ttsIconBtnActive]}
               accessibilityRole="button"
               accessibilityLabel={isTtsEnabled ? 'Disable text to speech' : 'Enable text to speech'}
@@ -840,6 +933,7 @@ export default function CameraDetectionScreen({ onBack }) {
       </View>
 
       <Text style={styles.statusText}>{status}</Text>
+      {ttsMode ? <Text style={styles.ttsModeText}>{ttsMode}</Text> : null}
 
       <View style={styles.transcriptBox}>
         <Text style={styles.transcriptLabel}>Translated Text</Text>
@@ -1072,6 +1166,12 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     marginBottom: 10,
     minHeight: 18,
+  },
+  ttsModeText: {
+    color: '#60A5FA',
+    marginBottom: 10,
+    minHeight: 18,
+    fontWeight: '700',
   },
   transcriptBox: {
     minHeight: 100,
