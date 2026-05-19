@@ -42,6 +42,7 @@ const RELEASE_STREAK_TO_REPEAT = AGGRESSIVE_DEMO_PRESET ? 1 : 2;
 const LANDMARK_FAST_ACCEPT_CONFIDENCE = AGGRESSIVE_DEMO_PRESET ? 0.74 : 0.82;
 const FRONT_CAMERA_CONF_OFFSET = 0.08;
 const HIGH_NO_DETECT_STREAK = 7;
+const TTS_MIN_INTERVAL_MS = 1700;
 const SHOW_LANDMARK_OVERLAY = Platform.OS !== 'android' || SHOW_ANDROID_LANDMARK_OVERLAY;
 const HAND_CONNECTIONS = [
   [0, 1],
@@ -104,6 +105,8 @@ export default function CameraDetectionScreen({ onBack }) {
   const lastSpokenLabelRef = useRef('');
   const ttsSoundRef = useRef(null);
   const ttsAudioFileRef = useRef('');
+  const ttsInFlightRef = useRef(false);
+  const lastTtsAttemptAtRef = useRef(0);
   const predictionBufferRef = useRef([]);
   const lastAcceptedPredictionRef = useRef({ label: '', timestamp: 0 });
   const cameraReadyAtRef = useRef(0);
@@ -472,7 +475,16 @@ export default function CameraDetectionScreen({ onBack }) {
     if (!isTtsEnabled || !label || lastSpokenLabelRef.current === label) {
       return;
     }
+    if (ttsInFlightRef.current) {
+      return;
+    }
+    const now = Date.now();
+    if (now - lastTtsAttemptAtRef.current < TTS_MIN_INTERVAL_MS) {
+      return;
+    }
 
+    ttsInFlightRef.current = true;
+    lastTtsAttemptAtRef.current = now;
     lastSpokenLabelRef.current = label;
 
     try {
@@ -480,14 +492,18 @@ export default function CameraDetectionScreen({ onBack }) {
       setTtsMode('Voice: gTTS');
     } catch (error) {
       console.warn('Backend TTS failed, falling back to device speech', error);
+      setTtsMode('Voice: backend unavailable');
       setStatus('Backend TTS unavailable, using device speech...');
       try {
         await speakWithExpoSpeech(label);
         setTtsMode('Voice: device fallback');
       } catch (fallbackError) {
+        setTtsMode('Voice: unavailable');
         setStatus('TTS unavailable on this device');
         console.error(fallbackError);
       }
+    } finally {
+      ttsInFlightRef.current = false;
     }
   };
 
