@@ -43,6 +43,7 @@ const LANDMARK_FAST_ACCEPT_CONFIDENCE = AGGRESSIVE_DEMO_PRESET ? 0.74 : 0.82;
 const FRONT_CAMERA_CONF_OFFSET = 0.08;
 const HIGH_NO_DETECT_STREAK = 7;
 const TTS_MIN_INTERVAL_MS = 1700;
+const WEB_AUDIO_UNLOCK_TIMEOUT_MS = 1600;
 const SILENT_WAV_DATA_URI =
   'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
 const SHOW_LANDMARK_OVERLAY = Platform.OS !== 'android' || SHOW_ANDROID_LANDMARK_OVERLAY;
@@ -110,6 +111,7 @@ export default function CameraDetectionScreen({ onBack }) {
   const ttsAudioFileRef = useRef('');
   const ttsBlobUrlRef = useRef('');
   const webHtmlAudioRef = useRef(null);
+  const isUnlockingWebAudioRef = useRef(false);
   const ttsInFlightRef = useRef(false);
   const lastTtsAttemptAtRef = useRef(0);
   const predictionBufferRef = useRef([]);
@@ -427,19 +429,27 @@ export default function CameraDetectionScreen({ onBack }) {
     if (isWebAudioUnlocked) {
       return true;
     }
+    if (isUnlockingWebAudioRef.current) {
+      return false;
+    }
     const HtmlAudioCtor = globalThis?.Audio;
     if (typeof HtmlAudioCtor !== 'function') {
       return false;
     }
+    isUnlockingWebAudioRef.current = true;
     try {
       const probe = new HtmlAudioCtor(SILENT_WAV_DATA_URI);
       probe.muted = false;
       probe.volume = 0.01;
       probe.playsInline = true;
       const playPromise = probe.play();
-      if (playPromise && typeof playPromise.then === 'function') {
-        await playPromise;
-      }
+      const settledPlay = playPromise && typeof playPromise.then === 'function'
+        ? playPromise
+        : Promise.resolve();
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Web audio unlock timed out')), WEB_AUDIO_UNLOCK_TIMEOUT_MS);
+      });
+      await Promise.race([settledPlay, timeoutPromise]);
       probe.pause();
       probe.currentTime = 0;
       probe.removeAttribute('src');
@@ -448,6 +458,8 @@ export default function CameraDetectionScreen({ onBack }) {
       return true;
     } catch {
       return false;
+    } finally {
+      isUnlockingWebAudioRef.current = false;
     }
   };
 
@@ -882,6 +894,7 @@ export default function CameraDetectionScreen({ onBack }) {
       return;
     }
     if (Platform.OS === 'web') {
+      setStatus('Enabling web audio...');
       unlockWebAudio().then((unlocked) => {
         if (!unlocked) {
           setIsTtsEnabled(false);
