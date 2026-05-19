@@ -1,6 +1,7 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as FileSystem from 'expo-file-system';
 import * as Speech from 'expo-speech';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -102,6 +103,7 @@ export default function CameraDetectionScreen({ onBack }) {
   const isRequestInFlightRef = useRef(false);
   const lastSpokenLabelRef = useRef('');
   const ttsSoundRef = useRef(null);
+  const ttsAudioFileRef = useRef('');
   const predictionBufferRef = useRef([]);
   const lastAcceptedPredictionRef = useRef({ label: '', timestamp: 0 });
   const cameraReadyAtRef = useRef(0);
@@ -130,9 +132,27 @@ export default function CameraDetectionScreen({ onBack }) {
         currentSound.stopAsync().catch(() => {});
         currentSound.unloadAsync().catch(() => {});
       }
+      const staleAudioPath = ttsAudioFileRef.current;
+      ttsAudioFileRef.current = '';
+      if (staleAudioPath) {
+        FileSystem.deleteAsync(staleAudioPath, { idempotent: true }).catch(() => {});
+      }
     },
     []
   );
+
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+    Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     datasetModeRef.current = datasetMode;
@@ -165,25 +185,6 @@ export default function CameraDetectionScreen({ onBack }) {
           mirrorFrontInput: Boolean(data?.mirror_front_camera_input),
           mediapipeError: data?.mediapipe?.last_error || '',
         };
-        // #region agent log
-        fetch('http://127.0.0.1:7751/ingest/c65f12af-7b42-4de0-a8f7-9a3cc5870009', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4c7b2f' },
-          body: JSON.stringify({
-            sessionId: '4c7b2f',
-            runId: 'run1',
-            hypothesisId: 'H2',
-            location: 'CameraDetectionScreen.js:163',
-            message: 'Loaded backend health details',
-            data: {
-              mediapipeMode: backendInfoRef.current.mediapipeMode,
-              mirrorFrontInput: backendInfoRef.current.mirrorFrontInput,
-              mediapipeError: backendInfoRef.current.mediapipeError || '',
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         if (backendInfoRef.current.mediapipeMode === 'disabled') {
           const backendReason = backendInfoRef.current.mediapipeError
             ? ` Reason: ${backendInfoRef.current.mediapipeError}`
@@ -380,6 +381,11 @@ export default function CameraDetectionScreen({ onBack }) {
     } catch {
       // Ignore unload errors on disposed sounds.
     }
+    const staleAudioPath = ttsAudioFileRef.current;
+    ttsAudioFileRef.current = '';
+    if (staleAudioPath) {
+      await FileSystem.deleteAsync(staleAudioPath, { idempotent: true }).catch(() => {});
+    }
   };
 
   const speakWithBackendTts = async (label) => {
@@ -408,11 +414,28 @@ export default function CameraDetectionScreen({ onBack }) {
 
     await Speech.stop();
     await stopBackendAudioPlayback();
-    const uri = `data:${payload?.mime_type || 'audio/mpeg'};base64,${payload.audio_base64}`;
-    const { sound } = await Audio.Sound.createAsync(
-      { uri },
-      { shouldPlay: true, progressUpdateIntervalMillis: 250 }
-    );
+    let playbackSource = null;
+    if (Platform.OS === 'web') {
+      playbackSource = {
+        uri: `data:${payload?.mime_type || 'audio/mpeg'};base64,${payload.audio_base64}`,
+      };
+    } else {
+      const baseCachePath = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+      if (!baseCachePath) {
+        throw new Error('No writable cache directory available for audio playback');
+      }
+      const audioPath = `${baseCachePath}tts-${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`;
+      await FileSystem.writeAsStringAsync(audioPath, payload.audio_base64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      ttsAudioFileRef.current = audioPath;
+      playbackSource = { uri: audioPath };
+    }
+
+    const { sound } = await Audio.Sound.createAsync(playbackSource, {
+      shouldPlay: true,
+      progressUpdateIntervalMillis: 250,
+    });
     ttsSoundRef.current = sound;
     sound.setOnPlaybackStatusUpdate((status) => {
       if (!status.isLoaded || !status.didJustFinish) {
@@ -421,6 +444,11 @@ export default function CameraDetectionScreen({ onBack }) {
       sound.unloadAsync().catch(() => {});
       if (ttsSoundRef.current === sound) {
         ttsSoundRef.current = null;
+      }
+      const staleAudioPath = ttsAudioFileRef.current;
+      ttsAudioFileRef.current = '';
+      if (staleAudioPath) {
+        FileSystem.deleteAsync(staleAudioPath, { idempotent: true }).catch(() => {});
       }
     });
   };
@@ -452,11 +480,12 @@ export default function CameraDetectionScreen({ onBack }) {
       setTtsMode('Voice: gTTS');
     } catch (error) {
       console.warn('Backend TTS failed, falling back to device speech', error);
+      setStatus('Backend TTS unavailable, using device speech...');
       try {
         await speakWithExpoSpeech(label);
         setTtsMode('Voice: device fallback');
       } catch (fallbackError) {
-        setStatus('TTS error on device');
+        setStatus('TTS unavailable on this device');
         console.error(fallbackError);
       }
     }
@@ -549,27 +578,6 @@ export default function CameraDetectionScreen({ onBack }) {
       // Keep MediaPipe enabled for assist, but avoid hard-blocking detection
       // on frames where landmarks are temporarily unavailable.
       const requireLandmarks = false;
-      // #region agent log
-      fetch('http://127.0.0.1:7751/ingest/c65f12af-7b42-4de0-a8f7-9a3cc5870009', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4c7b2f' },
-        body: JSON.stringify({
-          sessionId: '4c7b2f',
-          runId: 'run1',
-          hypothesisId: 'H1',
-          location: 'CameraDetectionScreen.js:530',
-          message: 'Sending detect request',
-          data: {
-            datasetMode: requestDatasetMode,
-            confThreshold: requestConfThreshold,
-            requireLandmarks,
-            isFrontCamera,
-            backendMediapipeMode: backendInfoRef.current.mediapipeMode,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       const response = await fetchWithTimeout(`${BACKEND_BASE_URL}/detect`, {
         method: 'POST',
         headers: {
@@ -592,30 +600,6 @@ export default function CameraDetectionScreen({ onBack }) {
       }
 
       const result = await response.json();
-      // #region agent log
-      fetch('http://127.0.0.1:7751/ingest/c65f12af-7b42-4de0-a8f7-9a3cc5870009', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4c7b2f' },
-        body: JSON.stringify({
-          sessionId: '4c7b2f',
-          runId: 'run1',
-          hypothesisId: 'H3',
-          location: 'CameraDetectionScreen.js:552',
-          message: 'Received detect response',
-          data: {
-            detected: Boolean(result?.detected),
-            label: result?.label || '',
-            predictionSource: result?.prediction_source || '',
-            confidence: Number(result?.confidence) || 0,
-            yoloConfidence: Number(result?.yolo_confidence) || 0,
-            mediapipeDetected: Boolean(result?.mediapipe_detected),
-            qualityHints: Array.isArray(result?.quality_hints) ? result.quality_hints : [],
-            landmarksCount: Array.isArray(result?.landmarks) ? result.landmarks.length : 0,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       if (requestDatasetMode !== datasetModeRef.current) {
         // User switched modes while this request was in flight.
         // Ignore stale response so UI instantly reflects the new mode.
@@ -656,25 +640,6 @@ export default function CameraDetectionScreen({ onBack }) {
         }
       } else {
         noDetectStreakRef.current += 1;
-        // #region agent log
-        fetch('http://127.0.0.1:7751/ingest/c65f12af-7b42-4de0-a8f7-9a3cc5870009', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4c7b2f' },
-          body: JSON.stringify({
-            sessionId: '4c7b2f',
-            runId: 'run1',
-            hypothesisId: 'H4',
-            location: 'CameraDetectionScreen.js:592',
-            message: 'No sign detected branch executed',
-            data: {
-              noDetectStreak: noDetectStreakRef.current,
-              releaseStreakToRepeat: RELEASE_STREAK_TO_REPEAT,
-              latestNetworkMs: latestNetworkMsRef.current,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         if (noDetectStreakRef.current >= RELEASE_STREAK_TO_REPEAT) {
           repeatReleaseRef.current = true;
         }
@@ -693,25 +658,6 @@ export default function CameraDetectionScreen({ onBack }) {
         MIN_DETECTION_INTERVAL_MS,
         MAX_DETECTION_INTERVAL_MS
       );
-      // #region agent log
-      fetch('http://127.0.0.1:7751/ingest/c65f12af-7b42-4de0-a8f7-9a3cc5870009', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4c7b2f' },
-        body: JSON.stringify({
-          sessionId: '4c7b2f',
-          runId: 'run1',
-          hypothesisId: 'H5',
-          location: 'CameraDetectionScreen.js:606',
-          message: 'Detection pipeline error',
-          data: {
-            errorName: error?.name || '',
-            errorMessage: error instanceof Error ? error.message : String(error),
-            adjustedIntervalMs: dynamicIntervalMsRef.current,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setStatus(`Detection error: ${msg}`);
       console.error('Detection pipeline error', error);
     } finally {
