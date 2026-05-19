@@ -165,6 +165,25 @@ export default function CameraDetectionScreen({ onBack }) {
           mirrorFrontInput: Boolean(data?.mirror_front_camera_input),
           mediapipeError: data?.mediapipe?.last_error || '',
         };
+        // #region agent log
+        fetch('http://127.0.0.1:7751/ingest/c65f12af-7b42-4de0-a8f7-9a3cc5870009', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4c7b2f' },
+          body: JSON.stringify({
+            sessionId: '4c7b2f',
+            runId: 'run1',
+            hypothesisId: 'H2',
+            location: 'CameraDetectionScreen.js:163',
+            message: 'Loaded backend health details',
+            data: {
+              mediapipeMode: backendInfoRef.current.mediapipeMode,
+              mirrorFrontInput: backendInfoRef.current.mirrorFrontInput,
+              mediapipeError: backendInfoRef.current.mediapipeError || '',
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         if (backendInfoRef.current.mediapipeMode === 'disabled') {
           const backendReason = backendInfoRef.current.mediapipeError
             ? ` Reason: ${backendInfoRef.current.mediapipeError}`
@@ -527,7 +546,30 @@ export default function CameraDetectionScreen({ onBack }) {
       }
 
       const requestStartedAt = Date.now();
-      const requireLandmarks = backendInfoRef.current.mediapipeMode !== 'disabled';
+      // Keep MediaPipe enabled for assist, but avoid hard-blocking detection
+      // on frames where landmarks are temporarily unavailable.
+      const requireLandmarks = false;
+      // #region agent log
+      fetch('http://127.0.0.1:7751/ingest/c65f12af-7b42-4de0-a8f7-9a3cc5870009', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4c7b2f' },
+        body: JSON.stringify({
+          sessionId: '4c7b2f',
+          runId: 'run1',
+          hypothesisId: 'H1',
+          location: 'CameraDetectionScreen.js:530',
+          message: 'Sending detect request',
+          data: {
+            datasetMode: requestDatasetMode,
+            confThreshold: requestConfThreshold,
+            requireLandmarks,
+            isFrontCamera,
+            backendMediapipeMode: backendInfoRef.current.mediapipeMode,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       const response = await fetchWithTimeout(`${BACKEND_BASE_URL}/detect`, {
         method: 'POST',
         headers: {
@@ -550,6 +592,30 @@ export default function CameraDetectionScreen({ onBack }) {
       }
 
       const result = await response.json();
+      // #region agent log
+      fetch('http://127.0.0.1:7751/ingest/c65f12af-7b42-4de0-a8f7-9a3cc5870009', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4c7b2f' },
+        body: JSON.stringify({
+          sessionId: '4c7b2f',
+          runId: 'run1',
+          hypothesisId: 'H3',
+          location: 'CameraDetectionScreen.js:552',
+          message: 'Received detect response',
+          data: {
+            detected: Boolean(result?.detected),
+            label: result?.label || '',
+            predictionSource: result?.prediction_source || '',
+            confidence: Number(result?.confidence) || 0,
+            yoloConfidence: Number(result?.yolo_confidence) || 0,
+            mediapipeDetected: Boolean(result?.mediapipe_detected),
+            qualityHints: Array.isArray(result?.quality_hints) ? result.quality_hints : [],
+            landmarksCount: Array.isArray(result?.landmarks) ? result.landmarks.length : 0,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       if (requestDatasetMode !== datasetModeRef.current) {
         // User switched modes while this request was in flight.
         // Ignore stale response so UI instantly reflects the new mode.
@@ -590,6 +656,25 @@ export default function CameraDetectionScreen({ onBack }) {
         }
       } else {
         noDetectStreakRef.current += 1;
+        // #region agent log
+        fetch('http://127.0.0.1:7751/ingest/c65f12af-7b42-4de0-a8f7-9a3cc5870009', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4c7b2f' },
+          body: JSON.stringify({
+            sessionId: '4c7b2f',
+            runId: 'run1',
+            hypothesisId: 'H4',
+            location: 'CameraDetectionScreen.js:592',
+            message: 'No sign detected branch executed',
+            data: {
+              noDetectStreak: noDetectStreakRef.current,
+              releaseStreakToRepeat: RELEASE_STREAK_TO_REPEAT,
+              latestNetworkMs: latestNetworkMsRef.current,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         if (noDetectStreakRef.current >= RELEASE_STREAK_TO_REPEAT) {
           repeatReleaseRef.current = true;
         }
@@ -608,6 +693,25 @@ export default function CameraDetectionScreen({ onBack }) {
         MIN_DETECTION_INTERVAL_MS,
         MAX_DETECTION_INTERVAL_MS
       );
+      // #region agent log
+      fetch('http://127.0.0.1:7751/ingest/c65f12af-7b42-4de0-a8f7-9a3cc5870009', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4c7b2f' },
+        body: JSON.stringify({
+          sessionId: '4c7b2f',
+          runId: 'run1',
+          hypothesisId: 'H5',
+          location: 'CameraDetectionScreen.js:606',
+          message: 'Detection pipeline error',
+          data: {
+            errorName: error?.name || '',
+            errorMessage: error instanceof Error ? error.message : String(error),
+            adjustedIntervalMs: dynamicIntervalMsRef.current,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setStatus(`Detection error: ${msg}`);
       console.error('Detection pipeline error', error);
     } finally {
