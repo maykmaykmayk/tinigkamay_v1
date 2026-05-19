@@ -18,11 +18,11 @@ const PLATFORM_PROFILE = Platform.select({
     maxCaptureAttempts: AGGRESSIVE_DEMO_PRESET ? 1 : 2,
   },
   web: {
-    detectionIntervalMs: 1000,
-    captureQuality: 0.75,
+    detectionIntervalMs: 650,
+    captureQuality: 0.5,
     confThreshold: 0.35,
     cameraWarmupMs: 350,
-    maxCaptureAttempts: 3,
+    maxCaptureAttempts: 1,
   },
   default: {
     detectionIntervalMs: 800,
@@ -32,13 +32,13 @@ const PLATFORM_PROFILE = Platform.select({
     maxCaptureAttempts: 1,
   },
 });
-const N_FRAME_WINDOW = AGGRESSIVE_DEMO_PRESET ? 2 : 4;
-const MIN_VOTES_TO_ACCEPT = AGGRESSIVE_DEMO_PRESET ? 2 : 3;
-const REPEAT_COOLDOWN_MS = AGGRESSIVE_DEMO_PRESET ? 280 : 800;
+const N_FRAME_WINDOW = Platform.OS === 'web' ? 2 : AGGRESSIVE_DEMO_PRESET ? 2 : 4;
+const MIN_VOTES_TO_ACCEPT = Platform.OS === 'web' ? 2 : AGGRESSIVE_DEMO_PRESET ? 2 : 3;
+const REPEAT_COOLDOWN_MS = Platform.OS === 'web' ? 300 : AGGRESSIVE_DEMO_PRESET ? 280 : 800;
 const REQUEST_TIMEOUT_MS = AGGRESSIVE_DEMO_PRESET ? 7000 : 9000;
 const MIN_DETECTION_INTERVAL_MS = AGGRESSIVE_DEMO_PRESET ? 140 : 700;
 const MAX_DETECTION_INTERVAL_MS = AGGRESSIVE_DEMO_PRESET ? 1000 : 1800;
-const RELEASE_STREAK_TO_REPEAT = AGGRESSIVE_DEMO_PRESET ? 1 : 2;
+const RELEASE_STREAK_TO_REPEAT = Platform.OS === 'web' ? 1 : AGGRESSIVE_DEMO_PRESET ? 1 : 2;
 const LANDMARK_FAST_ACCEPT_CONFIDENCE = AGGRESSIVE_DEMO_PRESET ? 0.74 : 0.82;
 const FRONT_CAMERA_CONF_OFFSET = 0.08;
 const HIGH_NO_DETECT_STREAK = 7;
