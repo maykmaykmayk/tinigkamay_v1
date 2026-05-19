@@ -105,6 +105,7 @@ export default function CameraDetectionScreen({ onBack }) {
   const lastSpokenLabelRef = useRef('');
   const ttsSoundRef = useRef(null);
   const ttsAudioFileRef = useRef('');
+  const ttsBlobUrlRef = useRef('');
   const ttsInFlightRef = useRef(false);
   const lastTtsAttemptAtRef = useRef(0);
   const predictionBufferRef = useRef([]);
@@ -139,6 +140,11 @@ export default function CameraDetectionScreen({ onBack }) {
       ttsAudioFileRef.current = '';
       if (staleAudioPath) {
         FileSystem.deleteAsync(staleAudioPath, { idempotent: true }).catch(() => {});
+      }
+      const staleBlobUrl = ttsBlobUrlRef.current;
+      ttsBlobUrlRef.current = '';
+      if (staleBlobUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+        URL.revokeObjectURL(staleBlobUrl);
       }
     },
     []
@@ -389,6 +395,27 @@ export default function CameraDetectionScreen({ onBack }) {
     if (staleAudioPath) {
       await FileSystem.deleteAsync(staleAudioPath, { idempotent: true }).catch(() => {});
     }
+    const staleBlobUrl = ttsBlobUrlRef.current;
+    ttsBlobUrlRef.current = '';
+    if (staleBlobUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+      URL.revokeObjectURL(staleBlobUrl);
+    }
+  };
+
+  const buildWebBlobUrlFromBase64 = (audioBase64, mimeType) => {
+    if (typeof atob !== 'function') {
+      throw new Error('Browser base64 decoder is unavailable');
+    }
+    if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+      throw new Error('Blob URL APIs are unavailable');
+    }
+    const binary = atob(audioBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    const blob = new Blob([bytes], { type: mimeType || 'audio/mpeg' });
+    return URL.createObjectURL(blob);
   };
 
   const speakWithBackendTts = async (label) => {
@@ -419,9 +446,9 @@ export default function CameraDetectionScreen({ onBack }) {
     await stopBackendAudioPlayback();
     let playbackSource = null;
     if (Platform.OS === 'web') {
-      playbackSource = {
-        uri: `data:${payload?.mime_type || 'audio/mpeg'};base64,${payload.audio_base64}`,
-      };
+      const blobUrl = buildWebBlobUrlFromBase64(payload.audio_base64, payload?.mime_type);
+      ttsBlobUrlRef.current = blobUrl;
+      playbackSource = { uri: blobUrl };
     } else {
       const baseCachePath = FileSystem.cacheDirectory || FileSystem.documentDirectory;
       if (!baseCachePath) {
@@ -452,6 +479,11 @@ export default function CameraDetectionScreen({ onBack }) {
       ttsAudioFileRef.current = '';
       if (staleAudioPath) {
         FileSystem.deleteAsync(staleAudioPath, { idempotent: true }).catch(() => {});
+      }
+      const staleBlobUrl = ttsBlobUrlRef.current;
+      ttsBlobUrlRef.current = '';
+      if (staleBlobUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+        URL.revokeObjectURL(staleBlobUrl);
       }
     });
   };
