@@ -43,6 +43,8 @@ const LANDMARK_FAST_ACCEPT_CONFIDENCE = AGGRESSIVE_DEMO_PRESET ? 0.74 : 0.82;
 const FRONT_CAMERA_CONF_OFFSET = 0.08;
 const HIGH_NO_DETECT_STREAK = 7;
 const TTS_MIN_INTERVAL_MS = 1700;
+const SILENT_WAV_DATA_URI =
+  'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
 const SHOW_LANDMARK_OVERLAY = Platform.OS !== 'android' || SHOW_ANDROID_LANDMARK_OVERLAY;
 const HAND_CONNECTIONS = [
   [0, 1],
@@ -82,6 +84,7 @@ export default function CameraDetectionScreen({ onBack }) {
   const [isCameraReady, setIsCameraReady] = useState(Platform.OS === 'web');
   const [cameraFacing, setCameraFacing] = useState('front');
   const [isTtsEnabled, setIsTtsEnabled] = useState(false);
+  const [isWebAudioUnlocked, setIsWebAudioUnlocked] = useState(Platform.OS !== 'web');
   const [ttsMode, setTtsMode] = useState('');
   const [translatedLines, setTranslatedLines] = useState([]);
   const [status, setStatus] = useState('Idle');
@@ -106,6 +109,7 @@ export default function CameraDetectionScreen({ onBack }) {
   const ttsSoundRef = useRef(null);
   const ttsAudioFileRef = useRef('');
   const ttsBlobUrlRef = useRef('');
+  const webHtmlAudioRef = useRef(null);
   const ttsInFlightRef = useRef(false);
   const lastTtsAttemptAtRef = useRef(0);
   const predictionBufferRef = useRef([]);
@@ -145,6 +149,13 @@ export default function CameraDetectionScreen({ onBack }) {
       ttsBlobUrlRef.current = '';
       if (staleBlobUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
         URL.revokeObjectURL(staleBlobUrl);
+      }
+      const htmlAudio = webHtmlAudioRef.current;
+      webHtmlAudioRef.current = null;
+      if (htmlAudio) {
+        htmlAudio.pause();
+        htmlAudio.removeAttribute('src');
+        htmlAudio.load();
       }
     },
     []
@@ -400,6 +411,42 @@ export default function CameraDetectionScreen({ onBack }) {
     if (staleBlobUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
       URL.revokeObjectURL(staleBlobUrl);
     }
+    const htmlAudio = webHtmlAudioRef.current;
+    webHtmlAudioRef.current = null;
+    if (htmlAudio) {
+      htmlAudio.pause();
+      htmlAudio.removeAttribute('src');
+      htmlAudio.load();
+    }
+  };
+
+  const unlockWebAudio = async () => {
+    if (Platform.OS !== 'web') {
+      return true;
+    }
+    if (isWebAudioUnlocked) {
+      return true;
+    }
+    const HtmlAudioCtor = globalThis?.Audio;
+    if (typeof HtmlAudioCtor !== 'function') {
+      return false;
+    }
+    try {
+      const probe = new HtmlAudioCtor(SILENT_WAV_DATA_URI);
+      probe.muted = true;
+      const playPromise = probe.play();
+      if (playPromise && typeof playPromise.then === 'function') {
+        await playPromise;
+      }
+      probe.pause();
+      probe.currentTime = 0;
+      probe.removeAttribute('src');
+      probe.load();
+      setIsWebAudioUnlocked(true);
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const buildWebBlobUrlFromBase64 = (audioBase64, mimeType) => {
@@ -416,6 +463,41 @@ export default function CameraDetectionScreen({ onBack }) {
     }
     const blob = new Blob([bytes], { type: mimeType || 'audio/mpeg' });
     return URL.createObjectURL(blob);
+  };
+
+  const playWithHtmlAudioElement = async (blobUrl) => {
+    const HtmlAudioCtor = globalThis?.Audio;
+    if (typeof HtmlAudioCtor !== 'function') {
+      throw new Error('HTMLAudioElement is unavailable');
+    }
+    const audio = new HtmlAudioCtor(blobUrl);
+    webHtmlAudioRef.current = audio;
+    audio.preload = 'auto';
+
+    await new Promise((resolve, reject) => {
+      const cleanup = () => {
+        audio.onended = null;
+        audio.onerror = null;
+      };
+      audio.onended = () => {
+        cleanup();
+        resolve();
+      };
+      audio.onerror = () => {
+        cleanup();
+        reject(new Error('HTML audio playback failed'));
+      };
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch((err) => {
+          cleanup();
+          reject(err);
+        });
+      }
+    });
+    if (webHtmlAudioRef.current === audio) {
+      webHtmlAudioRef.current = null;
+    }
   };
 
   const speakWithBackendTts = async (label) => {
@@ -445,10 +527,14 @@ export default function CameraDetectionScreen({ onBack }) {
     await Speech.stop();
     await stopBackendAudioPlayback();
     let playbackSource = null;
+    let webBlobUrl = '';
     if (Platform.OS === 'web') {
-      const blobUrl = buildWebBlobUrlFromBase64(payload.audio_base64, payload?.mime_type);
-      ttsBlobUrlRef.current = blobUrl;
-      playbackSource = { uri: blobUrl };
+      webBlobUrl = buildWebBlobUrlFromBase64(payload.audio_base64, payload?.mime_type);
+      ttsBlobUrlRef.current = webBlobUrl;
+      if (!isWebAudioUnlocked) {
+        throw new Error('WebAudioLocked');
+      }
+      playbackSource = { uri: webBlobUrl };
     } else {
       const baseCachePath = FileSystem.cacheDirectory || FileSystem.documentDirectory;
       if (!baseCachePath) {
@@ -462,10 +548,26 @@ export default function CameraDetectionScreen({ onBack }) {
       playbackSource = { uri: audioPath };
     }
 
-    const { sound } = await Audio.Sound.createAsync(playbackSource, {
-      shouldPlay: true,
-      progressUpdateIntervalMillis: 250,
-    });
+    let soundResult = null;
+    try {
+      soundResult = await Audio.Sound.createAsync(playbackSource, {
+        shouldPlay: true,
+        progressUpdateIntervalMillis: 250,
+      });
+    } catch (audioError) {
+      if (Platform.OS !== 'web' || !webBlobUrl) {
+        throw audioError;
+      }
+      await playWithHtmlAudioElement(webBlobUrl);
+      const staleBlobUrl = ttsBlobUrlRef.current;
+      ttsBlobUrlRef.current = '';
+      if (staleBlobUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+        URL.revokeObjectURL(staleBlobUrl);
+      }
+      return;
+    }
+
+    const { sound } = soundResult;
     ttsSoundRef.current = sound;
     sound.setOnPlaybackStatusUpdate((status) => {
       if (!status.isLoaded || !status.didJustFinish) {
@@ -523,6 +625,12 @@ export default function CameraDetectionScreen({ onBack }) {
       await speakWithBackendTts(label);
       setTtsMode('Voice: gTTS');
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (Platform.OS === 'web' && errorMessage.includes('WebAudioLocked')) {
+        setTtsMode('Voice: tap speaker to enable web audio');
+        setStatus('Web audio is locked. Tap the speaker button to enable TTS.');
+        return;
+      }
       console.warn('Backend TTS failed, falling back to device speech', error);
       setTtsMode('Voice: backend unavailable');
       setStatus('Backend TTS unavailable, using device speech...');
@@ -763,16 +871,37 @@ export default function CameraDetectionScreen({ onBack }) {
   };
 
   const toggleTts = () => {
-    setIsTtsEnabled((prev) => {
-      const next = !prev;
-      if (!next) {
-        Speech.stop();
-        stopBackendAudioPlayback().catch(() => {});
-        lastSpokenLabelRef.current = '';
-        setTtsMode('');
+    if (isTtsEnabled) {
+      if (Platform.OS === 'web' && !isWebAudioUnlocked) {
+        unlockWebAudio().then((unlocked) => {
+          if (!unlocked) {
+            setTtsMode('Voice: tap speaker to enable web audio');
+            setStatus('Browser blocked audio. Tap the speaker button again to enable TTS.');
+          } else {
+            setTtsMode('Voice: gTTS');
+            setStatus('Web audio enabled.');
+          }
+        });
+        return;
       }
-      return next;
-    });
+      Speech.stop();
+      stopBackendAudioPlayback().catch(() => {});
+      lastSpokenLabelRef.current = '';
+      setTtsMode('');
+      setIsTtsEnabled(false);
+      return;
+    }
+    setIsTtsEnabled(true);
+    if (Platform.OS === 'web') {
+      unlockWebAudio().then((unlocked) => {
+        if (!unlocked) {
+          setTtsMode('Voice: tap speaker to enable web audio');
+          setStatus('Browser blocked audio. Tap the speaker button again to enable TTS.');
+        } else {
+          setTtsMode('Voice: gTTS');
+        }
+      });
+    }
   };
 
   const toggleCameraFacing = () => {
