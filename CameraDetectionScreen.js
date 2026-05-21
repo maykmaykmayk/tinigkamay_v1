@@ -22,7 +22,7 @@ const PLATFORM_PROFILE = Platform.select({
     captureQuality: 0.5,
     confThreshold: 0.35,
     cameraWarmupMs: 350,
-    maxCaptureAttempts: 1,
+    maxCaptureAttempts: 2,
   },
   default: {
     detectionIntervalMs: 800,
@@ -1017,7 +1017,7 @@ export default function CameraDetectionScreen({ onBack }) {
                 current === 'Waiting for camera...' ||
                 current.startsWith('Camera') ||
                 current.includes('waiting for stream')
-                  ? `Camera ready (${isWeb ? 'web' : cameraFacing})`
+                  ? `Camera ready (${cameraFacing === 'front' ? 'Front' : 'Back'})`
                   : current
               );
             }}
