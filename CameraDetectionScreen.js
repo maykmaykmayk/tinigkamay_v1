@@ -182,7 +182,7 @@ export default function CameraDetectionScreen({ onBack }) {
 
   useEffect(() => {
     if (Platform.OS === 'web' && permission?.granted && !isCameraReady) {
-      setStatus('Camera permission granted (web), waiting for stream...');
+      setStatus('Camera permission granted, waiting for stream...');
     }
   }, [isCameraReady, permission?.granted]);
 
