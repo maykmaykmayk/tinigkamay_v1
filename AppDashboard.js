@@ -61,17 +61,6 @@ export default function AppDashboard() {
           </View>
           <Text style={styles.brandText}>TinigKamay</Text>
         </View>
-        <Pressable
-          accessibilityLabel="Notifications"
-          android_ripple={{ color: '#FFFFFF22' }}
-          onPress={() => {}}
-          style={styles.iconButton}
-        >
-          <MaterialIcons name="notifications-none" size={22} color={COLORS.textMuted} />
-          <View style={styles.notificationDotOuter}>
-            <View style={styles.notificationDotInner} />
-          </View>
-        </Pressable>
       </View>
 
       <ScrollView
@@ -162,32 +151,6 @@ const createStyles = ({ heroSize, horizontalPadding, isCompact, safeTopInset }) 
       justifyContent: 'center',
     },
     brandText: { color: COLORS.textStrong, fontSize: isCompact ? 21 : 23, fontWeight: '700' },
-    iconButton: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: '#111827',
-      position: 'relative',
-    },
-    notificationDotOuter: {
-      position: 'absolute',
-      top: 8,
-      right: 9,
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-      backgroundColor: '#256AF4AA',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    notificationDotInner: {
-      width: 5,
-      height: 5,
-      borderRadius: 3,
-      backgroundColor: COLORS.primary,
-    },
     main: { flex: 1 },
     mainContent: { flexGrow: 1 },
     container: {
